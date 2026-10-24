@@ -4,8 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Mainstage Radar — Listen</title>
-<!-- P20-8 stub: does Apple Music's own embedded player play inside Telegram? Telegram's script makes the page a
-     Mini App when it is opened as one (BotFather /newapp); opened as a plain link it is harmless. -->
+<!-- The Mini App «▶ Слушать» (P21-2, ADR-0011): the channel's header and a service's own player of the release —
+     Apple Music's, or YouTube's when the draft has no Apple Music link. The sound is streamed by the service; this
+     page keeps nothing. It is static — the user publishes it on GitHub Pages and registers it as the bot's Mini App
+     (BotFather); the post's button opens it as
+       https://t.me/<bot>?startapp=<album>_<song>   (or <album>, or _<song>) — Apple Music ids;
+       https://t.me/<bot>?startapp=yt_<video>      — the YouTube Music auto-track. -->
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
   :root { --lime: #D8FF3B; --white: #F5F5EF; --black: #0B0B0C; --muted: rgba(245, 245, 239, .62); }
@@ -16,68 +20,108 @@
   .brand b { display: block; letter-spacing: .3em; font-size: 15px; }
   .brand span { display: block; letter-spacing: .55em; font-size: 13px; font-weight: 300; color: var(--muted); }
   .dash { width: 32px; height: 4px; background: var(--lime); margin: 10px 0 28px; }
-  h1 { font-size: 40px; line-height: 1.02; margin: 0 0 8px; letter-spacing: .01em; text-transform: uppercase; }
+  h1 { font-size: 40px; line-height: 1.02; margin: 0 0 8px; letter-spacing: .01em; text-transform: uppercase;
+       overflow-wrap: anywhere; }
   .artist { letter-spacing: .16em; text-transform: uppercase; color: var(--muted); margin: 0 0 24px; }
   iframe { width: 100%; height: 175px; border: 0; border-radius: 12px; overflow: hidden; background: #1a1a1c; }
+  iframe.video { height: auto; aspect-ratio: 16 / 9; }
   .note { margin-top: 20px; font-size: 13px; color: var(--muted); line-height: 1.5; }
   .diag { margin-top: 24px; padding: 12px; border: 1px solid rgba(216, 255, 59, .35); border-radius: 10px;
-          font: 12px/1.5 ui-monospace, Menlo, monospace; color: var(--muted); word-break: break-word;
-          white-space: pre-wrap; }
+          font: 12px/1.5 ui-monospace, Menlo, monospace; color: var(--muted); white-space: pre-wrap; }
+  [hidden] { display: none !important; }
 </style>
 </head>
 <body>
 <main>
   <div class="brand"><b>MAINSTAGE</b><span>RADAR</span></div>
   <div class="dash"></div>
-  <h1 id="title">Teke Teke</h1>
-  <p class="artist" id="artist">NO SENS</p>
-  <!-- Apple's own embed snippet (Apple Music Marketing Tools): the sound is streamed by Apple, nothing is ours. -->
-  <iframe id="player"
-          allow="autoplay *; encrypted-media *; fullscreen *; clipboard-write"
-          sandbox="allow-forms allow-popups allow-same-origin allow-scripts allow-storage-access-by-user-activation allow-top-navigation-by-user-activation"
-          src="https://embed.music.apple.com/us/album/teke-teke/6807199430?i=6807199432"></iframe>
-  <p class="note">Tap ▶ Play in the player. Without an Apple Music subscription it plays a preview; signed in — the
-    whole track.</p>
-  <div class="diag" id="diag">…</div>
+  <h1 id="title"></h1>
+  <p class="artist" id="artist"></p>
+  <!-- Apple's own embed (Apple Music Marketing Tools), its address the one Apple's lookup gives — or YouTube's
+       embedded player, in its privacy-enhanced mode, YouTube's branding on it as its policies ask. -->
+  <!-- referrerpolicy: YouTube's player refuses with «Error 153» when it cannot tell which page embeds it. -->
+  <iframe id="player" hidden referrerpolicy="strict-origin-when-cross-origin"
+          allow="autoplay *; encrypted-media *; fullscreen *; clipboard-write; picture-in-picture"
+          sandbox="allow-forms allow-popups allow-same-origin allow-scripts allow-storage-access-by-user-activation allow-top-navigation-by-user-activation"></iframe>
+  <p class="note" id="note"></p>
+  <div class="diag" id="diag" hidden></div>
 </main>
 <script>
-  // What the test is about: where the page is open — a Mini App, Telegram's in-app browser or a plain browser.
   const tg = window.Telegram && window.Telegram.WebApp;
-  const inMiniApp = Boolean(tg && tg.initData);
   if (tg) { try { tg.ready(); tg.expand(); } catch (e) { /* outside Telegram the calls are no-ops */ } }
-  // A release other than the stub's: startapp (or ?am=) as «<albumId>_<songId>».
-  const start = (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) || new URLSearchParams(location.search).get("am");
-  const m = /^(\d+)(?:_(\d+))?$/.exec(start || "");
-  const diagExtra = [];
-  if (m) {
-    // The names and the player's address come from Apple's own lookup (CORS-open, checked 24.10): the page builds
-    // nothing from the ids itself — the player gets the album page Apple gives, with the song if one was asked.
-    const [, album, song] = m;
+  const query = new URLSearchParams(location.search);
+  // The release: startapp of the post's button — or ?am= when the page is opened as a plain link.
+  const start = (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) || query.get("am") || "";
+  const said = [];
+
+  function nothing(why) {
+    document.getElementById("title").textContent = "Open from a post";
+    document.getElementById("note").textContent = "The player opens from a post's «▶ Слушать» button.";
+    said.push(why);
+  }
+
+  const NOTES = {
+    apple: "Tap ▶ Play in the player. Without an Apple Music subscription it plays a preview; signed in — the whole track.",
+    youtube: "Tap ▶ in the player: it is the release's official audio on YouTube.",
+  };
+  const player = document.getElementById("player");
+
+  function show(title, artist, src, note, video) {
+    document.getElementById("title").textContent = title;
+    document.getElementById("artist").textContent = artist;
+    document.getElementById("note").textContent = note;
+    player.classList.toggle("video", video);
+    player.src = src;
+    player.hidden = false;
+    said.push("player: " + src);
+  }
+
+  const youtube = /^yt_([A-Za-z0-9_-]{11})$/.exec(start);
+  const ids = /^(\d*)(?:_(\d+))?$/.exec(start);
+  const found = Boolean(youtube) || Boolean(ids && (ids[1] || ids[2]));
+  if (youtube) {
+    // The names are YouTube's own (its oEmbed is CORS-open, checked 24.10): an auto-track is «<song>» by «<artist> - Topic».
+    const video = youtube[1];
+    const watch = `https://www.youtube.com/watch?v=${video}`;
+    fetch(`https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(watch)}`)
+      .then((r) => (r.ok ? r.json() : {}))
+      .catch(() => ({}))
+      .then((about) => show(about.title || "", (about.author_name || "").replace(/ - Topic$/, ""),
+                            `https://www.youtube-nocookie.com/embed/${video}`, NOTES.youtube, true))
+      .finally(diagnose);
+  } else if (found) {
+    // The names and the player's address are Apple's (its lookup is CORS-open, checked 24.10): nothing is built here
+    // from the ids — the player gets the page Apple gives, with the song when one was asked.
+    const [, album, song] = ids;
     fetch(`https://itunes.apple.com/lookup?id=${song || album}&country=us`)
       .then((r) => r.json())
       .then((answer) => {
         const item = (answer.results || [])[0];
         if (!item) throw new Error("Apple has nothing at " + (song || album));
-        document.getElementById("title").textContent = song ? item.trackName : item.collectionName;
-        document.getElementById("artist").textContent = item.artistName;
         const page = new URL(song ? item.trackViewUrl : item.collectionViewUrl);
         page.searchParams.delete("uo");
-        document.getElementById("player").src = page.href.replace("https://music.apple.com/", "https://embed.music.apple.com/");
-        diagExtra.push("player: " + document.getElementById("player").src);
+        show(song ? item.trackName : item.collectionName, item.artistName,
+             page.href.replace("https://music.apple.com/", "https://embed.music.apple.com/"), NOTES.apple, false);
       })
-      .catch((e) => diagExtra.push("lookup failed: " + e.message))
-      .finally(showDiag);
+      .catch((e) => nothing("lookup failed: " + e.message))
+      .finally(diagnose);
+  } else {
+    nothing("no release in the start parameter");
   }
-  function showDiag() {
-    document.getElementById("diag").textContent = [
-      "mini app: " + (inMiniApp ? "yes" : "no"),
+
+  // ?debug=1 — where the page runs and what it was told, for a check on a phone.
+  function diagnose() {
+    if (query.get("debug") !== "1") return;
+    const diag = document.getElementById("diag");
+    diag.hidden = false;
+    diag.textContent = [
+      "mini app: " + (tg && tg.initData ? "yes" : "no"),
       "telegram platform: " + (tg ? tg.platform : "—") + ", version " + (tg ? tg.version : "—"),
       "start param: " + (start || "—"),
-      ...diagExtra,
-      "user agent: " + navigator.userAgent,
+      ...said,
     ].join("\n");
   }
-  showDiag();
+  if (!found) diagnose();
 </script>
 </body>
 </html>
