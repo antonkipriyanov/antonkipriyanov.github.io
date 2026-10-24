@@ -48,18 +48,36 @@
   // A release other than the stub's: startapp (or ?am=) as «<albumId>_<songId>».
   const start = (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) || new URLSearchParams(location.search).get("am");
   const m = /^(\d+)(?:_(\d+))?$/.exec(start || "");
+  const diagExtra = [];
   if (m) {
-    document.getElementById("player").src =
-      `https://embed.music.apple.com/us/album/_/${m[1]}` + (m[2] ? `?i=${m[2]}` : "");
-    document.getElementById("title").textContent = "Release " + m[1];
-    document.getElementById("artist").textContent = "";
+    // The names and the player's address come from Apple's own lookup (CORS-open, checked 24.10): the page builds
+    // nothing from the ids itself — the player gets the album page Apple gives, with the song if one was asked.
+    const [, album, song] = m;
+    fetch(`https://itunes.apple.com/lookup?id=${song || album}&country=us`)
+      .then((r) => r.json())
+      .then((answer) => {
+        const item = (answer.results || [])[0];
+        if (!item) throw new Error("Apple has nothing at " + (song || album));
+        document.getElementById("title").textContent = song ? item.trackName : item.collectionName;
+        document.getElementById("artist").textContent = item.artistName;
+        const page = new URL(song ? item.trackViewUrl : item.collectionViewUrl);
+        page.searchParams.delete("uo");
+        document.getElementById("player").src = page.href.replace("https://music.apple.com/", "https://embed.music.apple.com/");
+        diagExtra.push("player: " + document.getElementById("player").src);
+      })
+      .catch((e) => diagExtra.push("lookup failed: " + e.message))
+      .finally(showDiag);
   }
-  document.getElementById("diag").textContent = [
-    "mini app: " + (inMiniApp ? "yes" : "no"),
-    "telegram platform: " + (tg ? tg.platform : "—") + ", version " + (tg ? tg.version : "—"),
-    "start param: " + (start || "—"),
-    "user agent: " + navigator.userAgent,
-  ].join("\n");
+  function showDiag() {
+    document.getElementById("diag").textContent = [
+      "mini app: " + (inMiniApp ? "yes" : "no"),
+      "telegram platform: " + (tg ? tg.platform : "—") + ", version " + (tg ? tg.version : "—"),
+      "start param: " + (start || "—"),
+      ...diagExtra,
+      "user agent: " + navigator.userAgent,
+    ].join("\n");
+  }
+  showDiag();
 </script>
 </body>
 </html>
