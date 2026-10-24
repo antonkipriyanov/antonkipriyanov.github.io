@@ -9,6 +9,7 @@
      page keeps nothing. It is static — the user publishes it on GitHub Pages and registers it as the bot's Mini App
      (BotFather); the post's button opens it as
        https://t.me/<bot>?startapp=<album>_<song>   (or <album>, or _<song>) — Apple Music ids;
+       https://t.me/<bot>?startapp=dza_<album>     (or dzt_<track>) — Deezer's widget, while the blog makes no money;
        https://t.me/<bot>?startapp=yt_<video>      — the YouTube Music auto-track. -->
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
@@ -25,6 +26,7 @@
   .artist { letter-spacing: .16em; text-transform: uppercase; color: var(--muted); margin: 0 0 24px; }
   iframe { width: 100%; height: 175px; border: 0; border-radius: 12px; overflow: hidden; background: #1a1a1c; }
   iframe.video { height: auto; aspect-ratio: 16 / 9; }
+  iframe.widget { height: 300px; }
   .note { margin-top: 20px; font-size: 13px; color: var(--muted); line-height: 1.5; }
   .note a { color: var(--white); }
   .diag { margin-top: 24px; padding: 12px; border: 1px solid rgba(216, 255, 59, .35); border-radius: 10px;
@@ -69,6 +71,7 @@
   const NOTES = {
     apple: "Tap ▶ Play in the player. Without an Apple Music subscription it plays a preview; signed in — the whole track.",
     youtube: "Tap ▶ in the player: it is the release's official audio on YouTube.",
+    deezer: "Tap ▶ in the player. Without a Deezer subscription it plays a preview.",
   };
   const player = document.getElementById("player");
 
@@ -77,6 +80,7 @@
     document.getElementById("artist").textContent = artist;
     document.getElementById("note").textContent = note;
     player.classList.toggle("video", video);
+    player.classList.toggle("widget", src.startsWith("https://widget.deezer.com/"));
     document.getElementById("youtube-terms").hidden = !video;
     player.src = src;
     player.hidden = false;
@@ -84,9 +88,23 @@
   }
 
   const youtube = /^yt_([A-Za-z0-9_-]{11})$/.exec(start);
+  const deezer = /^dz([at])_(\d+)$/.exec(start);
   const ids = /^(\d*)(?:_(\d+))?$/.exec(start);
-  const found = Boolean(youtube) || Boolean(ids && (ids[1] || ids[2]));
-  if (youtube) {
+  const found = Boolean(youtube) || Boolean(deezer) || Boolean(ids && (ids[1] || ids[2]));
+  if (deezer) {
+    // Deezer's API answers a page only as JSONP (no CORS header, checked 24.10) — the way it documents itself.
+    const kind = deezer[1] === "a" ? "album" : "track";
+    const id = deezer[2];
+    window.__deezer = (about) => {
+      show((about && about.title) || "", (about && about.artist && about.artist.name) || "",
+           `https://widget.deezer.com/widget/dark/${kind}/${id}`, NOTES.deezer, false);
+      diagnose();
+    };
+    const script = document.createElement("script");
+    script.src = `https://api.deezer.com/${kind}/${id}?output=jsonp&callback=__deezer`;
+    script.onerror = () => window.__deezer(null);
+    document.head.append(script);
+  } else if (youtube) {
     // The names are YouTube's own (its oEmbed is CORS-open, checked 24.10): an auto-track is «<song>» by «<artist> - Topic».
     const video = youtube[1];
     const watch = `https://www.youtube.com/watch?v=${video}`;
