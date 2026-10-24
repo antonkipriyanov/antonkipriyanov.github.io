@@ -26,6 +26,7 @@
   iframe { width: 100%; height: 175px; border: 0; border-radius: 12px; overflow: hidden; background: #1a1a1c; }
   iframe.video { height: auto; aspect-ratio: 16 / 9; }
   .note { margin-top: 20px; font-size: 13px; color: var(--muted); line-height: 1.5; }
+  .note a { color: var(--white); }
   .diag { margin-top: 24px; padding: 12px; border: 1px solid rgba(216, 255, 59, .35); border-radius: 10px;
           font: 12px/1.5 ui-monospace, Menlo, monospace; color: var(--muted); white-space: pre-wrap; }
   [hidden] { display: none !important; }
@@ -38,12 +39,17 @@
   <h1 id="title"></h1>
   <p class="artist" id="artist"></p>
   <!-- Apple's own embed (Apple Music Marketing Tools), its address the one Apple's lookup gives — or YouTube's
-       embedded player, in its privacy-enhanced mode, YouTube's branding on it as its policies ask. -->
+       embedded player, YouTube's branding on it as its policies ask. Not the privacy-enhanced youtube-nocookie.com:
+       there YouTube does not see a viewer who is signed in and asks to «confirm that you're not a bot» (24.10). -->
   <!-- referrerpolicy: YouTube's player refuses with «Error 153» when it cannot tell which page embeds it. -->
   <iframe id="player" hidden referrerpolicy="strict-origin-when-cross-origin"
           allow="autoplay *; encrypted-media *; fullscreen *; clipboard-write; picture-in-picture"
           sandbox="allow-forms allow-popups allow-same-origin allow-scripts allow-storage-access-by-user-activation allow-top-navigation-by-user-activation"></iframe>
   <p class="note" id="note"></p>
+  <!-- An embedded YouTube player makes the page a YouTube API client: its Terms of Service and Google's Privacy
+       Policy are linked where the player is (YouTube API Services — Developer Policies, III.A). -->
+  <p class="note" id="youtube-terms" hidden>The player is YouTube's: <a href="https://www.youtube.com/t/terms">YouTube
+    Terms of Service</a> · <a href="https://policies.google.com/privacy">Google Privacy Policy</a>.</p>
   <div class="diag" id="diag" hidden></div>
 </main>
 <script>
@@ -71,6 +77,7 @@
     document.getElementById("artist").textContent = artist;
     document.getElementById("note").textContent = note;
     player.classList.toggle("video", video);
+    document.getElementById("youtube-terms").hidden = !video;
     player.src = src;
     player.hidden = false;
     said.push("player: " + src);
@@ -87,7 +94,7 @@
       .then((r) => (r.ok ? r.json() : {}))
       .catch(() => ({}))
       .then((about) => show(about.title || "", (about.author_name || "").replace(/ - Topic$/, ""),
-                            `https://www.youtube-nocookie.com/embed/${video}`, NOTES.youtube, true))
+                            `https://www.youtube.com/embed/${video}`, NOTES.youtube, true))
       .finally(diagnose);
   } else if (found) {
     // The names and the player's address are Apple's (its lookup is CORS-open, checked 24.10): nothing is built here
