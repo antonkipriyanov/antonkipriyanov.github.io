@@ -27,6 +27,7 @@
   iframe { width: 100%; height: 175px; border: 0; border-radius: 12px; overflow: hidden; background: #1a1a1c; }
   iframe.video { height: auto; aspect-ratio: 16 / 9; }
   iframe.widget { height: 300px; }
+  iframe.album { height: 450px; }  /* Apple's album embed: the cover beside the track list */
   .note { margin-top: 20px; font-size: 13px; color: var(--muted); line-height: 1.5; }
   .note a { color: var(--white); }
   .diag { margin-top: 24px; padding: 12px; border: 1px solid rgba(216, 255, 59, .35); border-radius: 10px;
@@ -81,6 +82,7 @@
     document.getElementById("note").textContent = note;
     player.classList.toggle("video", video);
     player.classList.toggle("widget", src.startsWith("https://widget.deezer.com/"));
+    player.classList.toggle("album", src.startsWith("https://embed.music.apple.com/") && !src.includes("?i="));
     document.getElementById("youtube-terms").hidden = !video;
     player.src = src;
     player.hidden = false;
@@ -116,17 +118,29 @@
       .finally(diagnose);
   } else if (found) {
     // The names and the player's address are Apple's (its lookup is CORS-open, checked 24.10): nothing is built here
-    // from the ids — the player gets the page Apple gives, with the song when one was asked.
+    // from the ids — the player gets the page Apple gives. A song asked for, or an album of one song (a single), plays
+    // as that song — Apple's compact player; an album of several, as the album — its cover beside the track list.
     const [, album, song] = ids;
-    fetch(`https://itunes.apple.com/lookup?id=${song || album}&country=us`)
+    const embed = (url) => {
+      const page = new URL(url);
+      page.searchParams.delete("uo");
+      return page.href.replace("https://music.apple.com/", "https://embed.music.apple.com/");
+    };
+    const lookup = song ? `id=${song}` : `id=${album}&entity=song`;
+    fetch(`https://itunes.apple.com/lookup?${lookup}&country=us`)
       .then((r) => r.json())
       .then((answer) => {
-        const item = (answer.results || [])[0];
-        if (!item) throw new Error("Apple has nothing at " + (song || album));
-        const page = new URL(song ? item.trackViewUrl : item.collectionViewUrl);
-        page.searchParams.delete("uo");
-        show(song ? item.trackName : item.collectionName, item.artistName,
-             page.href.replace("https://music.apple.com/", "https://embed.music.apple.com/"), NOTES.apple, false);
+        const results = answer.results || [];
+        const songs = results.filter((r) => r.wrapperType === "track");
+        const one = song ? results[0] : songs.length === 1 ? songs[0] : null;
+        if (one) {
+          show(one.trackName, one.artistName, embed(one.trackViewUrl), NOTES.apple, false);
+          return;
+        }
+        const collection = results.find((r) => r.wrapperType === "collection");
+        if (!collection) throw new Error("Apple has nothing at " + (song || album));
+        show(collection.collectionName.replace(/ - (Single|EP)$/, ""), collection.artistName,
+             embed(collection.collectionViewUrl), NOTES.apple, false);
       })
       .catch((e) => nothing("lookup failed: " + e.message))
       .finally(diagnose);
